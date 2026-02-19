@@ -4,6 +4,19 @@ import { View, StyleSheet, Dimensions } from 'react-native'
 import { GameEngine } from 'react-native-game-engine'
 import { Button } from 'react-native-paper'
 
+const spawnDistance = 200;
+const distanceLimit = 300;
+
+const potentialRadius = 10;
+const potentialScanRadius = 100;
+
+
+const speedMinimum = 1/1000;
+const collisionScalar = 1/10;
+
+const kineticScalar = 1/10;
+const kineticMinimum = 1 / 1000;
+
 export type InputRef = {
   paused: boolean;
   controller: { x: number; y: number };
@@ -17,7 +30,7 @@ type Props = {
   children?: ReactNode,
   inputRef?: React.RefObject<InputRef>,
   entitiesRef?: React.RefObject<any>,
-  updateRemove?: (keys: string[]) => void,
+  onStatsChange?: (stats: { totalCreated: number; activeCount: number; totalMass?: number; totalEnergy?: number }) => void,
 }
 
 export const Box = (props: any) => {
@@ -39,9 +52,8 @@ const orbitArround = (box, center, radius) => {
 }
 
 const kineticEnergy = (box, nextPos) => {
-  const roundPoint = 100;
-
-  const mass = 1; // Assuming a mass of 1 for simplicity
+  const roundPoint = 1000;
+  const mass = box.mass ?? 1;
   const vel = { x: nextPos.x-box.position[0], y: nextPos.y-box.position[1] };
   const k = mass * (vel.x**2 + vel.y**2);
   const kinetic = Math.round(roundPoint * k)/roundPoint;
@@ -85,18 +97,6 @@ const potentialForce = () => {
   
 }
 
-
-const distanceLimit = 10000;
-
-const potentialRadius = 10;
-const potentialScanRadius = 100;
-
-
-const speedMinimum = 1/1000;
-const collisionScalar = 1/10;
-
-const kineticScalar = 1/10;
-const kineticMinimum = 1 / 1000;
 
 
 const potentialPoint = (point, entities) => {
@@ -161,13 +161,12 @@ const radialPotentialScan = (box, filteredEntities, fn?) => {
 
 const lastCreated = { time: 0, key: '' };
 
-export default function GameWorld({ children, inputRef, entitiesRef, updateRemove }: Props) {
+export default function GameWorld({ children, inputRef, entitiesRef, onStatsChange }: Props) {
   const engineRef = useRef<any>(null)
   const idCounter = useRef(0)
+  const totalCreatedRef = useRef(0)
   const localEntitiesRef = useRef<any>({})
   const resolvedEntitiesRef = entitiesRef ?? localEntitiesRef
-
-  const [updateTick, setUpdateTick] = useState(0);
 
 
   // helper to swap entities into the engine
@@ -181,23 +180,32 @@ export default function GameWorld({ children, inputRef, entitiesRef, updateRemov
       engineRef.current.swap(nextEntities);
     }
     // setUpdateTick(t => t + 1);
+    if (onStatsChange) {
+        const activeCount = Object.keys(nextEntities ?? {}).length
+        const totalMass = Object.values(nextEntities ?? {}).reduce((s:any, e:any) => s + (e?.mass ?? 0), 0)
+        const totalEnergy = Object.values(nextEntities ?? {}).reduce((s:any, e:any) => s + (e?.kinetic ?? 0), 0)
+
+        onStatsChange({ totalCreated: totalCreatedRef.current, activeCount, totalMass, totalEnergy:totalEnergy })
+    }
   }
 
   const addEntity = useCallback((spec: any) => {
     const key = spec.key || `ent_${Date.now()}_${(idCounter.current++)}`
     const entity = {
-      key,
+      id: key,
       time: spec.time ?? 0,
       mass: spec.mass ?? 1,
       position: spec.position ?? [0, 0],
       velocity: spec.velocity ?? [0, 0],
+      kinetic: 0,
       size: spec.size ?? 20,
-      renderer: spec.renderer ?? <Box key={key} />,
+      renderer: spec.renderer ?? (<Box key={key} />),
     }
+    totalCreatedRef.current += 1
     const next = { ...((resolvedEntitiesRef && resolvedEntitiesRef.current) ? resolvedEntitiesRef.current : {}), [key]: entity }
     swapEntities(next)
     return key
-  }, [resolvedEntitiesRef])
+  }, [resolvedEntitiesRef, onStatsChange])
 
   const addEntityWithVelocity = useCallback((pos: { x: number; y: number }, velocity: { x: number; y: number }, opts: any = {}) => {
     const spec = {
@@ -206,23 +214,24 @@ export default function GameWorld({ children, inputRef, entitiesRef, updateRemov
       mass: opts.mass ?? 1,
       size: opts.size ?? 20,
       renderer: opts.renderer ?? undefined,
+      kinetic: 0,
     }
     return addEntity(spec)
   }, [addEntity])
 
   const removeEntity = useCallback((key: string) => {
     if (!resolvedEntitiesRef.current || !resolvedEntitiesRef.current[key]) return
-    const next = { ...resolvedEntitiesRef.current }
+    const next = { ...((resolvedEntitiesRef && resolvedEntitiesRef.current) ? resolvedEntitiesRef.current : {}) }
     delete next[key]
     swapEntities(next)
-  }, [resolvedEntitiesRef])
+  }, [resolvedEntitiesRef, onStatsChange])
 
   const randomEntity = () => {
     
     const { width, height } = Dimensions.get('window');
     var c = { x: width / 2, y: height / 2 };
     var wt = 2 * Math.random() * Math.PI;
-    var r = { x: 600*Math.sin(wt) + c.x, y: 600*Math.cos(wt) + c.y };
+    var r = { x: spawnDistance*Math.sin(wt) + c.x, y: spawnDistance*Math.cos(wt) + c.y };
     var speed = Math.random()+1; // ajusta la magnitud de la velocidad aquí
     var v = { x: -Math.sin(wt) * speed, y: -Math.cos(wt) * speed };
     inputRef.current?.addEntityWithVelocity?.(r, v);
@@ -237,32 +246,58 @@ export default function GameWorld({ children, inputRef, entitiesRef, updateRemov
   // expose helpers on inputRef and ensure refs are initialized on mount
   useEffect(() => {
     if (!resolvedEntitiesRef.current) resolvedEntitiesRef.current = {}
+    totalCreatedRef.current = Object.keys(resolvedEntitiesRef.current ?? {}).length
+    if (onStatsChange) {
+      const activeCount = Object.keys(resolvedEntitiesRef.current ?? {}).length
+      const totalMass = Object.values(resolvedEntitiesRef.current ?? {}).reduce((s:any, e:any) => s + (e?.mass ?? 0), 0)
+      const totalEnergy = Object.values(resolvedEntitiesRef.current ?? {}).reduce((s:any, e:any) => s + (e?.kinetic ?? 0), 0)
+      onStatsChange({ totalCreated: totalCreatedRef.current, activeCount, totalMass, totalEnergy })
+    }
     if (!inputRef) return
     inputRef.current = inputRef.current ?? ({ paused: false, controller: { x: 0, y: 0 } } as unknown as InputRef)
     inputRef.current.addEntity = addEntity
     inputRef.current.addEntityWithVelocity = addEntityWithVelocity
     inputRef.current.removeEntity = removeEntity
     inputRef.current.randomEntity = randomEntity
-  }, [inputRef, resolvedEntitiesRef])
+  }, [inputRef, resolvedEntitiesRef, addEntity, addEntityWithVelocity, removeEntity, randomEntity, onStatsChange])
 
   return (
-    <View style={[styles.gameWorld]}>
-      <GameEngine ref={engineRef} systems={[createPhysics(inputRef, updateRemove)]} entities={resolvedEntitiesRef.current}
-        style={[{ flex: 1, width: '100%' }]}>
-        {children}
-      </GameEngine>
-    </View>
+    (() => {
+      const { width, height } = Dimensions.get('window')
+      const center = { x: width / 2, y: height / 2 }
+      return (
+        <View style={[styles.gameWorld]}>
+          <View pointerEvents="none" style={{
+            left:0, top:0, width, height,
+            position:'absolute',display:'flex', zIndex: 0
+            }}>
+            <View style={[styles.circle, { width: spawnDistance * 2, height: spawnDistance * 2, left: center.x - spawnDistance, top: center.y - spawnDistance, borderRadius: spawnDistance, borderColor: 'rgba(255,255,255,0.16)' }]} />
+            <View style={[styles.circle, { width: distanceLimit * 2, height: distanceLimit * 2, left: center.x - distanceLimit, top: center.y - distanceLimit, borderRadius: distanceLimit, borderColor: 'rgba(255,255,255,0.08)' }]} />
+          </View>
+          <GameEngine ref={engineRef} systems={[createPhysics(inputRef)]} entities={resolvedEntitiesRef.current}
+            style={[{ flex: 1, width: '100%' }]}>
+            {children}
+          </GameEngine>
+        </View>
+      )
+    })()
   )
 }
 
 
-const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys: string[]) => void) => {
+
+let allImpulse = { }
+let allColisions = { }
+let allEnergy = { }
+let allMerges = []
+
+const createPhysics = (inputRef: React.RefObject<InputRef>) => {
   return (entities: any, { time }: any) => {
     if (inputRef.current?.paused) return entities
 
-    let allImpulse = { }
-    let allColisions = { }
-    let allMerges = []
+    const { width, height } = Dimensions.get('window')
+    const center = { x: width / 2, y: height / 2 }
+
 
     for (const key in entities) {
       if (!Object.hasOwn(entities, key)) continue;
@@ -279,15 +314,14 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
         }
 
         
-        let filteredEntities: any[] = Object.values(entities).filter((e:any)=>e.key !== box.key);
+        let filteredEntities: any[] = Object.values(entities).filter((e:any)=>e.id !== box.id);
         let initialPos = { x: box.position[0], y: box.position[1] };
         let radialPotencial: any = radialPotentialScan(box, filteredEntities);
 
-
-
+        const m = box.mass ?? 1
         let impulse = {
-          x: radialPotencial.x * radialPotencial.motion * dt,
-          y: radialPotencial.y * radialPotencial.motion * dt,
+          x: (radialPotencial.x * radialPotencial.motion * dt) / m,
+          y: (radialPotencial.y * radialPotencial.motion * dt) / m,
         }
         let colisions = {
           x:0,y:0
@@ -297,14 +331,16 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
           const dy = initialPos.y - e.position[1];
           const distance = Math.sqrt(dx * dx + dy * dy);
 
-          if (distance < 20 && distance > 10) {
+          const size = (box.size / 2);
+          if (distance < size*2 && distance > size) {
             const vx = box.velocity[0]-e.velocity[0];
             const vy = box.velocity[1]-e.velocity[1];
-            colisions.x += vx*(-collisionScalar);
-            colisions.y += vy*(-collisionScalar);
-          } else if (distance <= 10) {
-            if (!allMerges.some((m:any)=>m.includes(box.key)&&m.includes(e.key))) {
-              allMerges.push([box.key,e.key]);
+            const massFactor = (e.mass ?? 1) / (box.mass ?? 1);
+            colisions.x += vx * (-collisionScalar) * massFactor;
+            colisions.y += vy * (-collisionScalar) * massFactor;
+          } else if (distance <= size) {
+            if (!allMerges.some((m:any)=>m.includes(box.id)&&m.includes(e.id))) {
+              allMerges.push([box.id,e.id]);
             }
           }
         });
@@ -338,8 +374,16 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
 
         // box.position[0] = nextPos.x;
         // box.position[1] = nextPos.y;
+
+
+        const inicialPos = { x: box.position[0], y: box.position[1] };
         box.position[0] += box.velocity[0] * dt
         box.position[1] += box.velocity[1] * dt
+
+        const kinetic = kineticEnergy(box, inicialPos);
+        kinetic&&(allEnergy[key] = {kinetic});
+
+        kinetic && (box.kinetic = kinetic);
 
       }
       
@@ -354,8 +398,26 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
       const circle = entities[merge[1]];
 
 
-      updateRemove([box.key]);
-      inputRef.current?.removeEntity(box.key);
+      const mergeMass = (box,circle) => {
+        box.mass += circle.mass;
+        box.size += circle.size/3;
+
+        circle.mass = 0;
+        circle.size = 0;
+
+        inputRef.current?.removeEntity(circle.id);
+      }
+
+      if (box.mass > 0 && circle.mass > 0) {
+        
+        if (box.mass >= circle.mass) {
+          mergeMass(box,circle);
+        } else {
+          mergeMass(circle,box);
+        }
+
+      }
+
 
     }
     
@@ -366,12 +428,11 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
       
       if (box && box.position) {
 
-        let nextPos = { x: box.position[0], y: box.position[1] };
-        const kinetic = kineticEnergy(box, nextPos);
+        let deltaPos = { x: box.position[0]-center.x, y: box.position[1]-center.y };
 
         const limit = distanceLimit;
-        if (Math.abs(box.velocity[0]) > limit || Math.abs(box.velocity[1]) > limit) {
-          inputRef.current?.removeEntity(box.key);
+        if (Math.abs(deltaPos.x) > limit || Math.abs(deltaPos.y) > limit) {
+          inputRef.current?.removeEntity(box.id);
         }
 
       }
@@ -380,7 +441,6 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
 
 
     if (time.current - lastCreated.time > 1000) {
-      console.log('Creating random entity');
       lastCreated.time = time.current;
       setTimeout(() => {
         inputRef.current?.randomEntity?.();
@@ -394,5 +454,6 @@ const createPhysics = (inputRef: React.RefObject<InputRef>, updateRemove: (keys:
 
 const styles = StyleSheet.create({
   gameWorld: { flex: 1, width: '100%', backgroundColor: '#aaa', justifyContent: 'center', alignItems: 'center' },
-  gameObject: { position: 'absolute', backgroundColor: '#fff', borderRadius: 4 },
+  gameObject: { position: 'absolute', backgroundColor: '#fff', borderRadius: '50%', zIndex:100 },
+  circle: { position: 'absolute', borderWidth: 1, backgroundColor: 'transparent' },
 })

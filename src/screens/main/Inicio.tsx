@@ -10,9 +10,12 @@ const lastCreated = { time: 0, key: '' };
 
 export default function Inicio({ navigation }: any) {
 
-  console.log('Rendering Inicio');
 
   const [hudVisible, setHudVisible] = useState(false);
+  const [totalCreated, setTotalCreated] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
+  const [totalMass, setTotalMass] = useState(0);
+  const [totalEnergy, setTotalEnergy] = useState(0);
   
 
   const HUD = ({ children }: { children?: React.ReactNode }) => {
@@ -61,9 +64,6 @@ export default function Inicio({ navigation }: any) {
 
 
   
-  const updateRemove = (keys: string[]) => {
-    keys.forEach(key => inputRef.current?.removeEntity(key));
-  }
   const initialEntities = {
     // box: { key: 'box', time: 100 * Math.PI, mass: 1, position: [450, 400], velocity: [0, 0], size: 30, renderer: <Box key="box" /> },
     // circle: { key: 'circle', time: 0, mass: 1, position: [50, 400], velocity: [0, 0], size: 30, renderer: <Box key="circle" /> },
@@ -73,12 +73,26 @@ export default function Inicio({ navigation }: any) {
   const entitiesRef = useRef<any>({ ...initialEntities })
 
   return (
-    <ScreenProvider title="Inicio" bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0}}>
+    <ScreenProvider title="Inicio" bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0,paddingBottom:40}}>
       <View style={[styles.container]}>
         <HUD>
           <Text style={styles.title}>¡Bienvenido a tu panel de control!</Text>
         </HUD>
-        <GameWorld inputRef={inputRef} entitiesRef={entitiesRef} updateRemove={updateRemove}></GameWorld>
+        <GameWorld
+          inputRef={inputRef}
+          entitiesRef={entitiesRef}
+          onStatsChange={({ totalCreated, activeCount, totalMass, totalEnergy }) => {
+
+            setTotalCreated(totalCreated);
+            setActiveCount(activeCount);
+            setTotalMass(totalMass ?? 0);
+
+            (totalEnergy>0)&&setTotalEnergy(totalEnergy ?? 0);
+          }}
+        ></GameWorld>
+        <View style={styles.statsContainer} pointerEvents="none">
+          <Text style={styles.statsText}>Cuerpos: {activeCount} • Masa: {Math.round(totalMass)} • KE: {Math.round(totalEnergy)}</Text>
+        </View>
         <View style={{ position: 'absolute', left: 16, right: 16, bottom: 16, zIndex: 20 }} pointerEvents="box-none">
           <Button mode="contained" onPress={()=>handleControl({ x: 0, y: -1 })}>
             {paused ? 'Subir' : 'Subir'}
@@ -138,6 +152,19 @@ const styles = StyleSheet.create({
     display:'flex', alignItems:'center', justifyContent:'center',
     borderColor: 'white', borderWidth: 2, borderRadius: 8,
   },
-  gameWorld: {flex:1, width: '100%', backgroundColor: '#aaa', justifyContent: 'center', alignItems: 'center'},
-  gameObject: {width:10, height: 10, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center'},
+  statsContainer: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 30,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  statsText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  }
 });

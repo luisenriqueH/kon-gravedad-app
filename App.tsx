@@ -118,8 +118,8 @@ function MainTabs() {
     >
       <Tab.Screen name="Inicio" component={Inicio} />
       {false && <Tab.Screen name="Eventos" component={Eventos} />}
-      <Tab.Screen name="Lugares" component={Lugares} />
-      <Tab.Screen name="Tienda" component={Tienda} />
+      {false && <Tab.Screen name="Lugares" component={Lugares} />}
+      {false && <Tab.Screen name="Tienda" component={Tienda} />}
       <Tab.Screen name="Ajustes" component={Ajustes} />
     </Tab.Navigator>
   );
@@ -142,25 +142,31 @@ export default function App() {
           <DataProvider>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
               <Stack.Screen name="Main" component={MainTabs} />
+
+
+              
               <Stack.Screen name="Profile" component={Profile} />
               <Stack.Screen name="Login" component={Login} />
               <Stack.Screen name="Register" component={Register} />
               <Stack.Screen name="ChangePassword" component={ChangePassword} />
               <Stack.Screen name="ChangeEmail" component={ChangeEmail} />
               <Stack.Screen name="DeleteAccount" component={DeleteAccount} />
-              <Stack.Screen name="PackageManager" component={PackageManager} />
-
-
-
-              <Stack.Screen name="Tienda" component={Tienda} />
-              <Stack.Screen name="ProductInfo" component={ProductInfo} />
-              <Stack.Screen name="RegisterProduct" component={RegisterProduct} />
-              <Stack.Screen name="ProductManager" component={ProductManager} />
 
 
               <Stack.Screen name="PersonalInfo" component={PersonalInfo} />
               <Stack.Screen name="RegisterPerson" component={RegisterPerson} />
 
+              
+
+              {/*
+              
+              <Stack.Screen name="PackageManager" component={PackageManager} />
+
+              <Stack.Screen name="Tienda" component={Tienda} />
+              <Stack.Screen name="ProductInfo" component={ProductInfo} />
+              <Stack.Screen name="RegisterProduct" component={RegisterProduct} />
+              <Stack.Screen name="ProductManager" component={ProductManager} />
+              
 
               <Stack.Screen name="EventInfo" component={EventInfo} />
               <Stack.Screen name="RegisterEvent" component={RegisterEvent} />
@@ -168,11 +174,11 @@ export default function App() {
               <Stack.Screen name="EventManager" component={EventManager} />
               <Stack.Screen name="EventQuery" component={EventQuery} />
               
-
-              {/* Add Place screens to navigator */}
+              Add Place screens to navigator 
+              
               <Stack.Screen name="PlaceInfo" component={PlaceInfo} />
               <Stack.Screen name="RegisterPlace" component={RegisterPlace} />
-              <Stack.Screen name="PlaceManager" component={PlaceManager} />
+              <Stack.Screen name="PlaceManager" component={PlaceManager} />*/}
 
 
             </Stack.Navigator>

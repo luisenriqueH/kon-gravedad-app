@@ -46,6 +46,7 @@
     "@babel/plugin-transform-template-literals": "^7.27.1",
     "@react-native-community/cli": "^20.1.0",
     "@types/react": "~19.1.0",
+    "babel-plugin-styled-components": "^2.1.4",
     "sharp": "^0.32.0",
     "typescript": "~5.9.2"
   },

@@ -112,7 +112,7 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
-      tabBar={(props) => <CustomTabBar {...props} />}
+      tabBar={(props) => (false&&(<CustomTabBar {...props} />))}
       screenOptions={{ headerShown: false }}
       sceneContainerStyle={{ marginLeft: isLarge ? 240 : 0 }}
     >

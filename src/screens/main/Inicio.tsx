@@ -42,6 +42,18 @@ export default function Inicio({ navigation }: any) {
   const inputRef = useRef<InputRef>({ paused: false, controller: { x: 0, y: 0 } })
   const [paused, setPaused] = useState(false)
   inputRef.current.paused = paused
+  const { width, height } = Dimensions.get('window');
+  const centerRef = useRef<{ x: number; y: number }>({ x: width / 2, y: height / 2 });
+
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragStartCenterRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    // expose centerRef to GameWorld via inputRef
+    if (inputRef && inputRef.current) {
+      inputRef.current.centerRef = centerRef as any;
+    }
+  }, [inputRef]);
   const handleControl = (vector:any) => {
     inputRef.current.controller = vector;
     setTimeout(() => { inputRef.current.controller = { x: 0, y: 0 } }, 10);
@@ -51,9 +63,7 @@ export default function Inicio({ navigation }: any) {
   }
 
   const randomEntity = () => {
-    
-    const { width, height } = Dimensions.get('window');
-    var c = { x: width / 2, y: height / 2 };
+    const c = centerRef.current;
     var wt = 2 * Math.random() * Math.PI;
     var r = { x: 600*Math.sin(wt) + c.x, y: 600*Math.cos(wt) + c.y };
     var speed = Math.random()+1; // ajusta la magnitud de la velocidad aquí
@@ -73,10 +83,33 @@ export default function Inicio({ navigation }: any) {
   const entitiesRef = useRef<any>({ ...initialEntities })
 
   return (
-    <ScreenProvider title="Inicio" bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0,paddingBottom:40}}>
-      <View style={[styles.container]}>
+    <ScreenProvider bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0}}>
+      <View style={[styles.container]} 
+          onStartShouldSetResponder={() => true}
+          onResponderGrant={(e) => {
+            const { pageX, pageY } = e.nativeEvent;
+            dragStartRef.current = { x: pageX, y: pageY };
+            dragStartCenterRef.current = { ...centerRef.current };
+          }}
+          onResponderMove={(e) => {
+            const { pageX, pageY } = e.nativeEvent;
+            if (!dragStartRef.current || !dragStartCenterRef.current) return;
+            const dx = pageX - dragStartRef.current.x;
+            const dy = pageY - dragStartRef.current.y;
+            // Move center proportional to drag delta, scaled by current zoom (world delta = screenDelta / zoom)
+            const zoom = inputRef.current.getZoom ? inputRef.current.getZoom() : (inputRef.current as any).zoom ?? 1;
+            const factor = 1 ;
+            const newCenter = { x: dragStartCenterRef.current.x + dx * factor, y: dragStartCenterRef.current.y + dy * factor };
+            centerRef.current = newCenter;
+            // notify GameWorld to re-render overlays
+            inputRef.current.setCenter?.(newCenter);
+          }}
+          onResponderRelease={() => { dragStartRef.current = null; dragStartCenterRef.current = null; }}>
         <HUD>
           <Text style={styles.title}>¡Bienvenido a tu panel de control!</Text>
+          <Button mode="contained" onPress={() => { inputRef.current.paused = !paused; setPaused(p => !p) }}>
+            {paused ? 'Reanudar' : 'Pausar'}
+          </Button>
         </HUD>
         <GameWorld
           inputRef={inputRef}
@@ -94,12 +127,6 @@ export default function Inicio({ navigation }: any) {
           <Text style={styles.statsText}>Cuerpos: {activeCount} • Masa: {Math.round(totalMass)} • KE: {Math.round(totalEnergy)}</Text>
         </View>
         <View style={{ position: 'absolute', left: 16, right: 16, bottom: 16, zIndex: 20 }} pointerEvents="box-none">
-          <Button mode="contained" onPress={()=>handleControl({ x: 0, y: -1 })}>
-            {paused ? 'Subir' : 'Subir'}
-          </Button>
-          <Button mode="contained" onPress={() => { inputRef.current.paused = !paused; setPaused(p => !p) }}>
-            {paused ? 'Reanudar' : 'Pausar'}
-          </Button>
         </View>
       </View>
     </ScreenProvider>

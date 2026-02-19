@@ -8,10 +8,16 @@ let spawnDistance = 200;
 let distanceLimit = 300;
 
 const LEVELS = [
-  { masaMinimal: 0, spawnDistance: 200, distanceLimit: 300, zoom: 1.0 },
-  { masaMinimal: 5, spawnDistance: 300, distanceLimit: 400, zoom: 0.9 },
-  { masaMinimal: 10, spawnDistance: 400, distanceLimit: 500, zoom: 0.8 },
-  { masaMinimal: 15, spawnDistance: 500, distanceLimit: 600, zoom: 0.7 },
+  { masaMinimal: 0, spawnDistance: 150, distanceLimit: 200, zoom: 1.0 },
+  { masaMinimal: 1, spawnDistance: 150, distanceLimit: 200, zoom: 1.0 },
+  { masaMinimal: 5, spawnDistance: 200, distanceLimit: 300, zoom: 1.0 },
+  { masaMinimal: 10, spawnDistance: 300, distanceLimit: 400, zoom: 0.9 },
+  { masaMinimal: 15, spawnDistance: 400, distanceLimit: 500, zoom: 0.9 },
+  { masaMinimal: 20, spawnDistance: 500, distanceLimit: 600, zoom: 0.9 },
+  { masaMinimal: 30, spawnDistance: 600, distanceLimit: 700, zoom: 0.8 },
+  { masaMinimal: 40, spawnDistance: 700, distanceLimit: 800, zoom: 0.8 },
+  { masaMinimal: 50, spawnDistance: 800, distanceLimit: 900, zoom: 0.8 },
+  { masaMinimal: 100, spawnDistance: 1000, distanceLimit: 1200, zoom: 0.5 },
 ];
 
 const LEVEL_DISPLAY_DURATION = 1500; // ms
@@ -19,6 +25,9 @@ const LEVEL_COOLDOWN = 1500; // ms
 
 const potentialRadius = 10;
 const potentialScanRadius = 100;
+
+const { width, height } = Dimensions.get('window');
+const customCenter = { x: width / 2, y: height / 2 };
 
 
 const speedMinimum = 1/1000;
@@ -34,7 +43,13 @@ export type InputRef = {
   addEntityWithVelocity?: (pos: { x: number; y: number }, velocity: { x: number; y: number }, opts?: any) => string;
   removeEntity?: (key: string) => void;
   randomEntity?: () => void;
+  getZoom?: () => number;
+  // Optional external center ref provided by parent (e.g., Inicio)
+  centerRef?: React.MutableRefObject<{ x: number; y: number }>;
+  // Optional helper to notify GameWorld that center changed (forces overlay re-render)
+  setCenter?: (c: { x: number; y: number }) => void;
 }
+
 
 type Props = {
   children?: ReactNode,
@@ -177,6 +192,10 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
   const totalCreatedRef = useRef(0)
   const localEntitiesRef = useRef<any>({})
   const resolvedEntitiesRef = entitiesRef ?? localEntitiesRef
+  // internal fallback center (used when parent doesn't provide centerRef)
+  const { width: _w, height: _h } = Dimensions.get('window')
+  const internalCenterRef = useRef<{ x: number; y: number }>({ x: _w / 2, y: _h / 2 })
+  const [centerVersion, setCenterVersion] = useState(0);
   
   const [currentLevel, setCurrentLevel] = useState(0);
   const lastLevelTimeRef = useRef(0);
@@ -191,7 +210,13 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
   const animatedZoomRef = useRef(new Animated.Value(1));
   const animatedZoom = animatedZoomRef.current;
 
+  // animated center translation for smooth camera movement
+  const animatedCenterRef = useRef(new Animated.ValueXY({ x: 0, y: 0 }));
+  const animatedCenter = animatedCenterRef.current;
+
   const animateZoom = (toValue: number, duration = 1000) => {
+    // update inputRef's synchronous zoom value if available
+    try { if (inputRef && inputRef.current) (inputRef.current as any).zoom = toValue } catch (e) {}
     Animated.timing(animatedZoom, { toValue, duration, useNativeDriver: true }).start();
   }
 
@@ -253,10 +278,10 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     swapEntities(next)
   }, [resolvedEntitiesRef, onStatsChange])
 
+
   const randomEntity = () => {
     
-    const { width, height } = Dimensions.get('window');
-    var c = { x: width / 2, y: height / 2 };
+    const c = inputRef?.current?.centerRef?.current ?? internalCenterRef.current ?? customCenter;
     var wt = 2 * Math.random() * Math.PI;
     var r = { x: spawnDistance*Math.sin(wt) + c.x, y: spawnDistance*Math.cos(wt) + c.y };
     var speed = Math.random()+1; // ajusta la magnitud de la velocidad aquí
@@ -286,6 +311,26 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     inputRef.current.addEntityWithVelocity = addEntityWithVelocity
     inputRef.current.removeEntity = removeEntity
     inputRef.current.randomEntity = randomEntity
+    // synchronous getter for current zoom (fallbacks to 1)
+    inputRef.current.getZoom = () => {
+      try {
+        const v = (animatedZoom as any).__getValue ? (animatedZoom as any).__getValue() : (animatedZoom as any)._value;
+        return typeof v === 'number' ? v : 1;
+      } catch (e) { return 1 }
+    }
+    // allow parent to notify GameWorld that center changed (so overlays re-render)
+    inputRef.current.setCenter = (c: { x: number; y: number }) => {
+      // update internal center reference
+      internalCenterRef.current = c;
+      // compute target translation so that 'c' appears at screen center
+      const { width: sw, height: sh } = Dimensions.get('window');
+      const zoom = inputRef.current.getZoom ? inputRef.current.getZoom() : 1;
+      const target = { x: (sw / 2 - c.x) * zoom, y: (sh / 2 - c.y) * zoom };
+      // animate camera translation
+      Animated.timing(animatedCenter, { toValue: target, duration: 400, useNativeDriver: true }).start();
+      // bump version for any non-animated overlays that depend on it
+      setCenterVersion(v => v + 1);
+    }
   }, [inputRef, resolvedEntitiesRef, addEntity, addEntityWithVelocity, removeEntity, randomEntity, onStatsChange])
 
   const handleLevelUp = (topMass: number, topSize: number) => {
@@ -321,8 +366,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     return (entities: any, { time }: any) => {
       if (inputRefInner.current?.paused) return entities
 
-      const { width, height } = Dimensions.get('window')
-      const center = { x: width / 2, y: height / 2 }
+      const center = inputRefInner.current?.centerRef?.current ?? internalCenterRef.current ?? customCenter;
 
 
       for (const key in entities) {
@@ -530,18 +574,18 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
 
   return (
     (() => {
-      const { width, height } = Dimensions.get('window')
-      const center = { x: width / 2, y: height / 2 }
+      const center = inputRef?.current?.centerRef?.current ?? internalCenterRef.current ?? customCenter
+
       return (
         <View style={[styles.gameWorld]}>
-          <View pointerEvents="none" style={{
-            left:0, top:0, width, height,
-            position:'absolute',display:'flex', zIndex: 0
-            }}>
-            <View style={[styles.circle, { width: spawnDistance * 2, height: spawnDistance * 2, left: center.x - spawnDistance, top: center.y - spawnDistance, borderRadius: spawnDistance, borderColor: 'rgba(255,255,255,0.16)' }]} />
-            <View style={[styles.circle, { width: distanceLimit * 2, height: distanceLimit * 2, left: center.x - distanceLimit, top: center.y - distanceLimit, borderRadius: distanceLimit, borderColor: 'rgba(255,255,255,0.08)' }]} />
-          </View>
-          <Animated.View style={{ flex: 1, width: '100%', transform: [{ scale: animatedZoom }], justifyContent: 'center' }}>
+          <Animated.View style={{ flex: 1, width: '100%', justifyContent: 'center', transform: [...animatedCenter.getTranslateTransform(), { scale: animatedZoom }] }}>
+            <View pointerEvents="none" style={{
+              left:0, top:0, width, height,
+              position:'absolute',display:'flex', zIndex: 0
+              }}>
+              <View style={[styles.circle, { width: spawnDistance * 2, height: spawnDistance * 2, left: center.x - spawnDistance, top: center.y - spawnDistance, borderRadius: spawnDistance, borderColor: 'rgba(255,255,255,0.3)' }]} />
+              <View style={[styles.circle, { width: distanceLimit * 2, height: distanceLimit * 2, left: center.x - distanceLimit, top: center.y - distanceLimit, borderRadius: distanceLimit, borderColor: 'rgba(255,255,255,0.1)' }]} />
+            </View>
             <GameEngine ref={engineRef} systems={[createPhysicsLocal(inputRef)]} entities={resolvedEntitiesRef.current}
               style={[{ flex: 1, width: '100%' }]}>
               {children}
@@ -573,5 +617,5 @@ let allMerges = []
 const styles = StyleSheet.create({
   gameWorld: { flex: 1, width: '100%', backgroundColor: '#aaa', justifyContent: 'center', alignItems: 'center' },
   gameObject: { position: 'absolute', backgroundColor: '#fff', borderRadius: '50%', zIndex:100 },
-  circle: { position: 'absolute', borderWidth: 1, backgroundColor: 'transparent' },
+  circle: { position: 'absolute', borderWidth:10, backgroundColor: 'transparent' },
 })

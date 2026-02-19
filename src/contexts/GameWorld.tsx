@@ -1,11 +1,21 @@
 
 import React, { ReactNode, useRef, useEffect, useState, useCallback } from 'react'
-import { View, StyleSheet, Dimensions } from 'react-native'
+import { View, StyleSheet, Dimensions, Text, Animated } from 'react-native'
 import { GameEngine } from 'react-native-game-engine'
 import { Button } from 'react-native-paper'
 
-const spawnDistance = 200;
-const distanceLimit = 300;
+let spawnDistance = 200;
+let distanceLimit = 300;
+
+const LEVELS = [
+  { masaMinimal: 0, spawnDistance: 200, distanceLimit: 300, zoom: 1.0 },
+  { masaMinimal: 5, spawnDistance: 300, distanceLimit: 400, zoom: 0.9 },
+  { masaMinimal: 10, spawnDistance: 400, distanceLimit: 500, zoom: 0.8 },
+  { masaMinimal: 15, spawnDistance: 500, distanceLimit: 600, zoom: 0.7 },
+];
+
+const LEVEL_DISPLAY_DURATION = 1500; // ms
+const LEVEL_COOLDOWN = 1500; // ms
 
 const potentialRadius = 10;
 const potentialScanRadius = 100;
@@ -167,6 +177,23 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
   const totalCreatedRef = useRef(0)
   const localEntitiesRef = useRef<any>({})
   const resolvedEntitiesRef = entitiesRef ?? localEntitiesRef
+  
+  const [currentLevel, setCurrentLevel] = useState(0);
+  const lastLevelTimeRef = useRef(0);
+  const [levelVisible, setLevelVisible] = useState(false);
+  const [levelText, setLevelText] = useState('');
+  const [levelFontSize, setLevelFontSize] = useState(48);
+  const topEntityIdRef = useRef<string | null>(null);
+  const [penaltyVisible, setPenaltyVisible] = useState(false);
+  const [penaltyText, setPenaltyText] = useState('');
+  const [penaltyFontSize, setPenaltyFontSize] = useState(36);
+  // animated zoom value for smooth transitions
+  const animatedZoomRef = useRef(new Animated.Value(1));
+  const animatedZoom = animatedZoomRef.current;
+
+  const animateZoom = (toValue: number, duration = 1000) => {
+    Animated.timing(animatedZoom, { toValue, duration, useNativeDriver: true }).start();
+  }
 
 
   // helper to swap entities into the engine
@@ -261,6 +288,246 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     inputRef.current.randomEntity = randomEntity
   }, [inputRef, resolvedEntitiesRef, addEntity, addEntityWithVelocity, removeEntity, randomEntity, onStatsChange])
 
+  const handleLevelUp = (topMass: number, topSize: number) => {
+    const nextLevelIndex = currentLevel; // levels are 0-based in LEVELS
+    const nextLevel = LEVELS[nextLevelIndex];
+    if (!nextLevel) return;
+    if (topMass >= nextLevel.masaMinimal) {
+      const now = Date.now();
+      if (now - lastLevelTimeRef.current < LEVEL_COOLDOWN) return;
+      lastLevelTimeRef.current = now;
+      const newLevel = currentLevel + 1;
+      setCurrentLevel(newLevel);
+      // update global spawn/distance so systems use new values
+      spawnDistance = nextLevel.spawnDistance;
+      distanceLimit = nextLevel.distanceLimit;
+      // show central number equal to the mass threshold (e.g., "5")
+      setLevelText(String(nextLevel.masaMinimal));
+      const fs = Math.min(Math.max((topSize || 20) * 0.8, 24), 220);
+      setLevelFontSize(fs);
+      setLevelVisible(true);
+      setTimeout(() => setLevelVisible(false), LEVEL_DISPLAY_DURATION);
+      // compute zoom: base level zoom adjusted by topSize (bigger size -> zoom out a bit)
+      const baseZoom = typeof nextLevel.zoom === 'number' ? nextLevel.zoom : 1;
+      const sizeFactor = Math.min(1.0, 40 / (topSize || 20));
+      const finalZoom = Math.max(0.4, Math.min(1.5, baseZoom * sizeFactor));
+      animateZoom(finalZoom);
+      if (newLevel === 1) console.log('Entraste en el primer nivel');
+    }
+  }
+
+  // createPhysics uses module-level accumulators but needs to call handleLevelUp
+  const createPhysicsLocal = (inputRefInner: React.RefObject<InputRef>) => {
+    return (entities: any, { time }: any) => {
+      if (inputRefInner.current?.paused) return entities
+
+      const { width, height } = Dimensions.get('window')
+      const center = { x: width / 2, y: height / 2 }
+
+
+      for (const key in entities) {
+        if (!Object.hasOwn(entities, key)) continue;
+        
+        const box = entities[key];
+        
+        if (box && box.position) {
+          const dt = 1 * (time.delta / 16.6667);
+          box.time += dt
+          const ctrl = inputRefInner.current?.controller
+          if (ctrl) {
+            // box.velocity[0] += ctrl.x * dt
+            // box.velocity[1] += ctrl.y * dt
+          }
+
+          
+          let filteredEntities: any[] = Object.values(entities).filter((e:any)=>e.id !== box.id);
+          let initialPos = { x: box.position[0], y: box.position[1] };
+          let radialPotencial: any = radialPotentialScan(box, filteredEntities);
+
+          const m = box.mass ?? 1
+          let impulse = {
+            x: (radialPotencial.x * radialPotencial.motion * dt) / m,
+            y: (radialPotencial.y * radialPotencial.motion * dt) / m,
+          }
+          let colisions = {
+            x:0,y:0
+          }
+          filteredEntities.forEach(e=>{
+            const dx = initialPos.x - e.position[0];
+            const dy = initialPos.y - e.position[1];
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            const size = (box.size / 2);
+            if (distance < size*2 && distance > size) {
+              const vx = box.velocity[0]-e.velocity[0];
+              const vy = box.velocity[1]-e.velocity[1];
+              const massFactor = (e.mass ?? 1) / (box.mass ?? 1);
+              colisions.x += vx * (-collisionScalar) * massFactor;
+              colisions.y += vy * (-collisionScalar) * massFactor;
+            } else if (distance <= size) {
+              if (!allMerges.some((m:any)=>m.includes(box.id)&&m.includes(e.id))) {
+                allMerges.push([box.id,e.id]);
+              }
+            }
+          });
+          
+
+          allImpulse[key] = impulse;
+          allColisions[key] = colisions;
+
+        }
+        
+      }
+      for (const key in entities) {
+        if (!Object.hasOwn(entities, key)) continue;
+        
+        const box = entities[key];
+        
+        if (box && box.position) {
+          const dt = 1 * (time.delta / 16.6667);
+          box.time += dt
+
+          const impulse = allImpulse[key] || { x: 0, y: 0 };
+          const colisions = allColisions[key] || { x: 0, y: 0 };
+
+          box.velocity[0] += impulse.x + colisions.x;
+          box.velocity[1] += impulse.y + colisions.y;
+
+
+          if (Math.abs(box.velocity[0]) < speedMinimum) box.velocity[0] = 0;
+          if (Math.abs(box.velocity[1]) < speedMinimum) box.velocity[1] = 0;
+
+
+          // box.position[0] = nextPos.x;
+          // box.position[1] = nextPos.y;
+
+
+          const inicialPos = { x: box.position[0], y: box.position[1] };
+          box.position[0] += box.velocity[0] * dt
+          box.position[1] += box.velocity[1] * dt
+
+          const kinetic = kineticEnergy(box, inicialPos);
+          kinetic&&(allEnergy[key] = {kinetic});
+
+          kinetic && (box.kinetic = kinetic);
+
+        }
+        
+      }
+      
+      for (const merge of allMerges) {
+        if (!Object.hasOwn(entities, merge[0])) continue;
+        if (!Object.hasOwn(entities, merge[1])) continue;
+
+        
+        const box = entities[merge[0]];
+        const circle = entities[merge[1]];
+
+
+        const mergeMass = (box,circle) => {
+          box.mass += circle.mass;
+          box.size += circle.size/3;
+
+          circle.mass = 0;
+          circle.size = 0;
+
+          inputRefInner.current?.removeEntity(circle.id);
+        }
+
+        if (box.mass > 0 && circle.mass > 0) {
+          
+          if (box.mass >= circle.mass) {
+            mergeMass(box,circle);
+          } else {
+            mergeMass(circle,box);
+          }
+
+        }
+
+
+      }
+      
+      // After merges, compute top entity mass to detect level ups
+      let topMass = 0;
+      let topSize = 20;
+      for (const key in entities) {
+        if (!Object.hasOwn(entities, key)) continue;
+        const b = entities[key];
+        if (b && typeof b.mass === 'number' && b.mass > topMass) {
+          topMass = b.mass;
+          topSize = b.size ?? topSize;
+          topEntityIdRef.current = b.id;
+        }
+      }
+
+      if (topMass > 0) {
+        handleLevelUp(topMass, topSize);
+      }
+      // Level down: if currentLevel > 0 and topMass is below the required threshold, drop a level
+      if (currentLevel > 0) {
+        const required = LEVELS[currentLevel - 1]?.masaMinimal ?? Infinity;
+        if ((topMass || 0) < required) {
+          const now = Date.now();
+          if (now - lastLevelTimeRef.current >= LEVEL_COOLDOWN) {
+            lastLevelTimeRef.current = now;
+            const newLevel = Math.max(0, currentLevel - 1);
+            setCurrentLevel(newLevel);
+            if (newLevel === 0) {
+              spawnDistance = 200;
+              distanceLimit = 300;
+              animateZoom(1);
+            } else {
+              const lvl = LEVELS[newLevel - 1];
+              spawnDistance = lvl.spawnDistance;
+              distanceLimit = lvl.distanceLimit;
+              animateZoom(lvl.zoom ?? 1);
+            }
+          }
+        }
+      }
+      
+      for (const key in entities) {
+        if (!Object.hasOwn(entities, key)) continue;
+        
+        const box = entities[key];
+        
+        if (box && box.position) {
+
+          let deltaPos = { x: box.position[0]-center.x, y: box.position[1]-center.y };
+
+          const limit = distanceLimit;
+          if (Math.abs(deltaPos.x) > limit || Math.abs(deltaPos.y) > limit) {
+            // if the entity leaving is the current top entity, show penalty (negative mass)
+            if (box.id && topEntityIdRef.current === box.id) {
+              const massVal = Math.round(box.mass ?? 0);
+              
+              if (massVal < 3) { continue; } // no penalty for small entities
+              setPenaltyText(`-${massVal}`);
+              const pfs = Math.min(Math.max((box.size ?? 20) * 0.6, 18), 180);
+              setPenaltyFontSize(pfs);
+              setPenaltyVisible(true);
+              setTimeout(() => setPenaltyVisible(false), LEVEL_DISPLAY_DURATION);
+            }
+            inputRefInner.current?.removeEntity(box.id);
+          }
+
+        }
+        
+      }
+
+
+      if (time.current - lastCreated.time > 1000) {
+        lastCreated.time = time.current;
+        setTimeout(() => {
+          inputRefInner.current?.randomEntity?.();
+        }, 0);
+      }
+
+
+      return entities
+    }
+  }
+
   return (
     (() => {
       const { width, height } = Dimensions.get('window')
@@ -274,10 +541,22 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
             <View style={[styles.circle, { width: spawnDistance * 2, height: spawnDistance * 2, left: center.x - spawnDistance, top: center.y - spawnDistance, borderRadius: spawnDistance, borderColor: 'rgba(255,255,255,0.16)' }]} />
             <View style={[styles.circle, { width: distanceLimit * 2, height: distanceLimit * 2, left: center.x - distanceLimit, top: center.y - distanceLimit, borderRadius: distanceLimit, borderColor: 'rgba(255,255,255,0.08)' }]} />
           </View>
-          <GameEngine ref={engineRef} systems={[createPhysics(inputRef)]} entities={resolvedEntitiesRef.current}
-            style={[{ flex: 1, width: '100%' }]}>
-            {children}
-          </GameEngine>
+          <Animated.View style={{ flex: 1, width: '100%', transform: [{ scale: animatedZoom }], justifyContent: 'center' }}>
+            <GameEngine ref={engineRef} systems={[createPhysicsLocal(inputRef)]} entities={resolvedEntitiesRef.current}
+              style={[{ flex: 1, width: '100%' }]}>
+              {children}
+            </GameEngine>
+          </Animated.View>
+
+          {/* Level indicator overlay */}
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', zIndex: 20 }]}>
+            {levelVisible && (
+              <Text style={{ fontSize: levelFontSize, color: '#ffffff', fontWeight: '700' }}>{levelText}</Text>
+            )}
+            {penaltyVisible && (
+              <Text style={{ fontSize: penaltyFontSize, color: '#ff6666', fontWeight: '700', marginTop: 8 }}>{penaltyText}</Text>
+            )}
+          </View>
         </View>
       )
     })()
@@ -290,167 +569,6 @@ let allImpulse = { }
 let allColisions = { }
 let allEnergy = { }
 let allMerges = []
-
-const createPhysics = (inputRef: React.RefObject<InputRef>) => {
-  return (entities: any, { time }: any) => {
-    if (inputRef.current?.paused) return entities
-
-    const { width, height } = Dimensions.get('window')
-    const center = { x: width / 2, y: height / 2 }
-
-
-    for (const key in entities) {
-      if (!Object.hasOwn(entities, key)) continue;
-      
-      const box = entities[key];
-      
-      if (box && box.position) {
-        const dt = 1 * (time.delta / 16.6667);
-        box.time += dt
-        const ctrl = inputRef.current?.controller
-        if (ctrl) {
-          // box.velocity[0] += ctrl.x * dt
-          // box.velocity[1] += ctrl.y * dt
-        }
-
-        
-        let filteredEntities: any[] = Object.values(entities).filter((e:any)=>e.id !== box.id);
-        let initialPos = { x: box.position[0], y: box.position[1] };
-        let radialPotencial: any = radialPotentialScan(box, filteredEntities);
-
-        const m = box.mass ?? 1
-        let impulse = {
-          x: (radialPotencial.x * radialPotencial.motion * dt) / m,
-          y: (radialPotencial.y * radialPotencial.motion * dt) / m,
-        }
-        let colisions = {
-          x:0,y:0
-        }
-        filteredEntities.forEach(e=>{
-          const dx = initialPos.x - e.position[0];
-          const dy = initialPos.y - e.position[1];
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          const size = (box.size / 2);
-          if (distance < size*2 && distance > size) {
-            const vx = box.velocity[0]-e.velocity[0];
-            const vy = box.velocity[1]-e.velocity[1];
-            const massFactor = (e.mass ?? 1) / (box.mass ?? 1);
-            colisions.x += vx * (-collisionScalar) * massFactor;
-            colisions.y += vy * (-collisionScalar) * massFactor;
-          } else if (distance <= size) {
-            if (!allMerges.some((m:any)=>m.includes(box.id)&&m.includes(e.id))) {
-              allMerges.push([box.id,e.id]);
-            }
-          }
-        });
-        
-
-        allImpulse[key] = impulse;
-        allColisions[key] = colisions;
-
-      }
-      
-    }
-    for (const key in entities) {
-      if (!Object.hasOwn(entities, key)) continue;
-      
-      const box = entities[key];
-      
-      if (box && box.position) {
-        const dt = 1 * (time.delta / 16.6667);
-        box.time += dt
-
-        const impulse = allImpulse[key] || { x: 0, y: 0 };
-        const colisions = allColisions[key] || { x: 0, y: 0 };
-
-        box.velocity[0] += impulse.x + colisions.x;
-        box.velocity[1] += impulse.y + colisions.y;
-
-
-        if (Math.abs(box.velocity[0]) < speedMinimum) box.velocity[0] = 0;
-        if (Math.abs(box.velocity[1]) < speedMinimum) box.velocity[1] = 0;
-
-
-        // box.position[0] = nextPos.x;
-        // box.position[1] = nextPos.y;
-
-
-        const inicialPos = { x: box.position[0], y: box.position[1] };
-        box.position[0] += box.velocity[0] * dt
-        box.position[1] += box.velocity[1] * dt
-
-        const kinetic = kineticEnergy(box, inicialPos);
-        kinetic&&(allEnergy[key] = {kinetic});
-
-        kinetic && (box.kinetic = kinetic);
-
-      }
-      
-    }
-    
-    for (const merge of allMerges) {
-      if (!Object.hasOwn(entities, merge[0])) continue;
-      if (!Object.hasOwn(entities, merge[1])) continue;
-
-      
-      const box = entities[merge[0]];
-      const circle = entities[merge[1]];
-
-
-      const mergeMass = (box,circle) => {
-        box.mass += circle.mass;
-        box.size += circle.size/3;
-
-        circle.mass = 0;
-        circle.size = 0;
-
-        inputRef.current?.removeEntity(circle.id);
-      }
-
-      if (box.mass > 0 && circle.mass > 0) {
-        
-        if (box.mass >= circle.mass) {
-          mergeMass(box,circle);
-        } else {
-          mergeMass(circle,box);
-        }
-
-      }
-
-
-    }
-    
-    for (const key in entities) {
-      if (!Object.hasOwn(entities, key)) continue;
-      
-      const box = entities[key];
-      
-      if (box && box.position) {
-
-        let deltaPos = { x: box.position[0]-center.x, y: box.position[1]-center.y };
-
-        const limit = distanceLimit;
-        if (Math.abs(deltaPos.x) > limit || Math.abs(deltaPos.y) > limit) {
-          inputRef.current?.removeEntity(box.id);
-        }
-
-      }
-      
-    }
-
-
-    if (time.current - lastCreated.time > 1000) {
-      lastCreated.time = time.current;
-      setTimeout(() => {
-        inputRef.current?.randomEntity?.();
-      }, 0);
-    }
-
-
-    return entities
-  }
-}
 
 const styles = StyleSheet.create({
   gameWorld: { flex: 1, width: '100%', backgroundColor: '#aaa', justifyContent: 'center', alignItems: 'center' },

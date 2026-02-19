@@ -20,7 +20,7 @@ export default function Inicio({ navigation }: any) {
 
   const HUD = ({ children }: { children?: React.ReactNode }) => {
     return (
-      <View style={[styles.hudContainer]}>
+      <View style={[styles.hudContainer, {display: 'none'}]}>
         {
           hudVisible ? (
             <View style={[styles.hud]}>
@@ -59,18 +59,9 @@ export default function Inicio({ navigation }: any) {
     setTimeout(() => { inputRef.current.controller = { x: 0, y: 0 } }, 10);
 
 
-    randomEntity();
+    inputRef.current.randomEntity();
   }
 
-  const randomEntity = () => {
-    const c = centerRef.current;
-    var wt = 2 * Math.random() * Math.PI;
-    var r = { x: 600*Math.sin(wt) + c.x, y: 600*Math.cos(wt) + c.y };
-    var speed = Math.random()+1; // ajusta la magnitud de la velocidad aquí
-    var v = { x: -Math.sin(wt) * speed, y: -Math.cos(wt) * speed };
-    inputRef.current.addEntityWithVelocity?.(r, v);
-
-  }
 
 
   
@@ -83,7 +74,7 @@ export default function Inicio({ navigation }: any) {
   const entitiesRef = useRef<any>({ ...initialEntities })
 
   return (
-    <ScreenProvider bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0}}>
+    <ScreenProvider bottomButtons={true} style={{padding:0}} contentStyle={{flex:1,padding:0,paddingInline:0}}>
       <View style={[styles.container]} 
           onStartShouldSetResponder={() => true}
           onResponderGrant={(e) => {
@@ -127,6 +118,10 @@ export default function Inicio({ navigation }: any) {
           <Text style={styles.statsText}>Cuerpos: {activeCount} • Masa: {Math.round(totalMass)} • KE: {Math.round(totalEnergy)}</Text>
         </View>
         <View style={{ position: 'absolute', left: 16, right: 16, bottom: 16, zIndex: 20 }} pointerEvents="box-none">
+
+          <Button mode="contained" style={{display:'none'}} onPress={()=>handleControl({ x: 0, y: -1 })}>
+            {paused ? 'Subir' : 'Subir'}
+          </Button>
         </View>
       </View>
     </ScreenProvider>

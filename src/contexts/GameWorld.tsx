@@ -564,7 +564,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
         lastCreated.time = time.current;
         setTimeout(() => {
           inputRefInner.current?.randomEntity?.();
-        }, 0);
+        }, 10);
       }
 
 

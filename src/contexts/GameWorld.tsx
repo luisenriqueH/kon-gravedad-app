@@ -264,16 +264,13 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
   // animated zoom value for smooth transitions
   const animatedZoomRef = useRef(new Animated.Value(1));
   const animatedZoom = animatedZoomRef.current;
-  // JS-side source-of-truth for current zoom (avoids reading Animated internals)
-  const currentZoomRef = useRef<number>(1);
 
   // animated center translation for smooth camera movement
   const animatedCenterRef = useRef(new Animated.ValueXY({ x: 0, y: 0 }));
   const animatedCenter = animatedCenterRef.current;
 
   const animateZoom = (toValue: number, duration = 1000) => {
-    // update JS-side zoom immediately so JS logic stays consistent
-    currentZoomRef.current = toValue;
+    // update inputRef's synchronous zoom value if available
     try { if (inputRef && inputRef.current) (inputRef.current as any).zoom = toValue } catch (e) {}
     Animated.timing(animatedZoom, { toValue, duration, useNativeDriver: true }).start();
   }
@@ -462,8 +459,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     // synchronous getter for current zoom (fallbacks to 1)
     inputRef.current.getZoom = () => {
       try {
-        // Prefer the JS-side ref which is updated synchronously by animateZoom
-        const v = currentZoomRef.current ?? 1;
+        const v = (animatedZoom as any).__getValue ? (animatedZoom as any).__getValue() : (animatedZoom as any)._value;
         return typeof v === 'number' ? v : 1;
       } catch (e) { return 1 }
     }
@@ -473,10 +469,8 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
       internalCenterRef.current = c;
       // compute target translation so that 'c' appears at screen center
       const { width: sw, height: sh } = Dimensions.get('window');
-      const zoom = inputRef.current.getZoom ? inputRef.current.getZoom() : (currentZoomRef.current ?? 1);
-      // Translate is applied BEFORE scale in the render transform, so to center a world
-      // point `c` on screen we compute: translate = screenCenter/zoom - worldPos
-      const target = { x: (sw / 2) / zoom - c.x, y: (sh / 2) / zoom - c.y };
+      const zoom = inputRef.current.getZoom ? inputRef.current.getZoom() : 1;
+      const target = { x: (sw / 2 - c.x) * zoom, y: (sh / 2 - c.y) * zoom };
       // animate camera translation
       Animated.timing(animatedCenter, { toValue: target, duration: 400, useNativeDriver: true }).start();
       // bump version for any non-animated overlays that depend on it

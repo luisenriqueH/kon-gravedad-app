@@ -29,7 +29,7 @@ export default function Inicio({ navigation }: any) {
   // game config and rewards
   const gameConfigRef = useRef<any>({
     goodvsevil: 11/10,
-    godtimer: 3000,
+    godtimer: 1000,
     fnAngle: () => Math.random(),
     fnMassPotential: (e: any, distance: number) => { const potential = (e.mass ?? 0) / distance; return 2 * potential; }
   });

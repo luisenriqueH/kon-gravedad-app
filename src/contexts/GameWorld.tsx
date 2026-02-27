@@ -1,8 +1,41 @@
 
 import React, { ReactNode, useRef, useEffect, useState, useCallback } from 'react'
-import { View, StyleSheet, Dimensions, Text, Animated } from 'react-native'
+import { View, StyleSheet, Dimensions, Text, Animated, TouchableOpacity } from 'react-native'
 import { GameEngine } from 'react-native-game-engine'
 import { Button } from 'react-native-paper'
+import {bodyVolumen, MassBody} from './MassBody';
+
+
+
+// GameLogic
+const goodvsevil = 11/10;
+const godtimer = 3000;
+const fnMassToEnergy = (e) => {
+  const mass = e.mass ?? 0;
+  const kinetic = e.kinetic ?? 0;
+  const energyGained = mass * c * c + kinetic;
+  return goodvsevil * energyGained;
+};
+const fnEnergyToMass = (e) => {
+  const mass = e.mass ?? 1;
+  const kinetic = e.kinetic ?? 0;
+  const energyCost = mass * c * c + kinetic;
+  return energyCost;
+};
+const fnAngle = () => {
+  
+  return Math.random();
+};
+const fnMassPotential = (e, distance) => {
+  const potential = e.mass / distance;
+  return 2 * potential;
+};
+//
+
+
+
+
+let dir = 1;
 
 let spawnDistance = 200;
 let distanceLimit = 300;
@@ -23,15 +56,24 @@ const LEVELS = [
 const LEVEL_DISPLAY_DURATION = 1500; // ms
 const LEVEL_COOLDOWN = 1500; // ms
 
-const potentialRadius = 10;
-const potentialScanRadius = 100;
+
+export const initialEnergy = 20000;
+const c = 10;
+
+export const potentialRadius = 2;
+export const potentialScanRadius = 4;
 
 const { width, height } = Dimensions.get('window');
 const customCenter = { x: width / 2, y: height / 2 };
 
+// shared fallback so renderers can access inputRef even if GameEngine
+// doesn't pass it through props for some renderers
+let sharedInputRef: React.RefObject<InputRef> | null = null;
+
 
 const speedMinimum = 1/1000;
 const collisionScalar = 1/10;
+export const criticalMass = 10;
 
 const kineticScalar = 1/10;
 const kineticMinimum = 1 / 1000;
@@ -44,6 +86,17 @@ export type InputRef = {
   removeEntity?: (key: string) => void;
   randomEntity?: () => void;
   getZoom?: () => number;
+  getEnergy?: () => number;
+  addEnergy?: (n: number) => void;
+  consumeEnergy?: (n: number) => boolean;
+  // Lives API exposed by parent (Inicio)
+  getLives?: () => number;
+  consumeLife?: (n: number) => boolean;
+  addLives?: (n: number) => void;
+  // Rewards / dynamic game config
+  getGameConfig?: () => any;
+  offerReward?: (r: any) => void;
+  convertMassToEnergy?: (id: string) => void;
   // Optional external center ref provided by parent (e.g., Inicio)
   centerRef?: React.MutableRefObject<{ x: number; y: number }>;
   // Optional helper to notify GameWorld that center changed (forces overlay re-render)
@@ -58,14 +111,7 @@ type Props = {
   onStatsChange?: (stats: { totalCreated: number; activeCount: number; totalMass?: number; totalEnergy?: number }) => void,
 }
 
-export const Box = (props: any) => {
-  const { time = 0, position = [0, 0], velocity = [0, 0], size = 20 } = props
-  const x = position[0]
-  const y = position[1]
-  return (
-    <View style={[styles.gameObject, { width: size, height: size }, { left: x - size / 2, top: y - size / 2 }]} />
-  )
-}
+
 
 const orbitArround = (box, center, radius) => {
   const w = 1/100
@@ -95,7 +141,7 @@ const radialScan = (center, radius, fn?) => {
     return Array.from({ length: count }, (_, i) => start + i * step)
   }
   
-  const angles = generateAngles(36)
+  const angles = generateAngles(8)
   const points = angles.map(angle => {
     const x = radius.x * Math.sin(angle) + center.x
     const y = radius.y * Math.cos(angle) + center.y
@@ -124,17 +170,17 @@ const potentialForce = () => {
 
 
 
-const potentialPoint = (point, entities) => {
+const potentialPoint = (box, entities) => {
         
   let potential = 0
 
   for (const element of entities) {
-    const dx = point.x - element.position[0];
-    const dy = point.y - element.position[1];
+    const dx = box.position[0] - element.position[0];
+    const dy = box.position[1] - element.position[1];
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (distance > potentialRadius) {
-      const g = element.mass / distance;
+    if (distance > potentialRadius*box.size/2) {
+      const g = fnMassPotential(element, distance);
       potential += g;
     } else {
       potential += 0;
@@ -146,7 +192,9 @@ const potentialPoint = (point, entities) => {
 }
 
 const radialPotentialScan = (box, filteredEntities, fn?) => {
-  const r = potentialScanRadius;
+  const r = potentialScanRadius*box.size/2;
+
+
   const k = kineticScalar;
 
   const radius = { x: r, y: r };
@@ -158,7 +206,7 @@ const radialPotentialScan = (box, filteredEntities, fn?) => {
   let currentVelocity = { x: box.velocity[0], y: box.velocity[1] };
   let force = { x: 0, y: 0, motion: 0 };
 
-  const { best, worst, delta: potentialRange } = radialScanTarget(initialPos, radius, (p:any) => potentialPoint(p, filteredEntities));
+  const { best, worst, delta: potentialRange } = radialScanTarget(initialPos, radius, (p:any) => potentialPoint({ position: [p.x, p.y], mass: box.mass, size: box.size }, filteredEntities));
   if (best.point && worst.point && potentialRange > 0) {
     const dx = best.point.x - initialPos.x;
     const dy = best.point.y - initialPos.y;
@@ -166,14 +214,19 @@ const radialPotentialScan = (box, filteredEntities, fn?) => {
 
     const du = { x: dx / distance, y: dy / distance };
 
-    const initialPotential = potentialPoint(initialPos, filteredEntities);
+    const initialPotential = potentialPoint({ position: [initialPos.x, initialPos.y], mass: box.mass, size: box.size }, filteredEntities);
     const potential = best.potential;
 
     const deltaKinetic = (potential - initialPotential) * k;
+
+
+    // console.log('deltaKinetic', deltaKinetic, 'potentialRange', potentialRange);
+
     let motion = Math.max(deltaKinetic, kineticMinimum);
 
     // Optionally scale motion by the potential range to emphasize larger gradients
     motion = motion * (1 + potentialRange);
+    motion = (potential) * 1/100;
 
     force = { x: du.x, y: du.y, motion };
   } else {
@@ -202,10 +255,12 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
   const [levelVisible, setLevelVisible] = useState(false);
   const [levelText, setLevelText] = useState('');
   const [levelFontSize, setLevelFontSize] = useState(48);
-  const topEntityIdRef = useRef<string | null>(null);
   const [penaltyVisible, setPenaltyVisible] = useState(false);
   const [penaltyText, setPenaltyText] = useState('');
   const [penaltyFontSize, setPenaltyFontSize] = useState(36);
+
+
+  const topEntityIdRef = useRef<string | null>(null);
   // animated zoom value for smooth transitions
   const animatedZoomRef = useRef(new Animated.Value(1));
   const animatedZoom = animatedZoomRef.current;
@@ -232,26 +287,78 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
       engineRef.current.swap(nextEntities);
     }
     // setUpdateTick(t => t + 1);
-    if (onStatsChange) {
-        const activeCount = Object.keys(nextEntities ?? {}).length
-        const totalMass = Object.values(nextEntities ?? {}).reduce((s:any, e:any) => s + (e?.mass ?? 0), 0)
-        const totalEnergy = Object.values(nextEntities ?? {}).reduce((s:any, e:any) => s + (e?.kinetic ?? 0), 0)
+    // emit stats after swapping
+    emitStats()
+  }
 
-        onStatsChange({ totalCreated: totalCreatedRef.current, activeCount, totalMass, totalEnergy:totalEnergy })
-    }
+  const emitStats = (energyOverride?: number) => {
+    if (!onStatsChange) return
+    const ents = resolvedEntitiesRef.current ?? {}
+    const activeCount = Object.keys(ents).length
+    const totalMass = Object.values(ents).reduce((s:any, e:any) => s + (e?.mass ?? 0), 0)
+    const totalKinetic = Object.values(ents).reduce((s:any, e:any) => s + (e?.kinetic ?? 0), 0)
+    const energyVal = typeof energyOverride === 'number'
+      ? energyOverride
+      : (inputRef && inputRef.current && typeof inputRef.current.getEnergy === 'function')
+        ? inputRef.current.getEnergy()
+        : initialEnergy
+    onStatsChange({ totalCreated: totalCreatedRef.current, activeCount, totalMass, totalEnergy: energyVal + (totalKinetic ?? 0) })
+  }
+
+  // Energy is owned/managed by parent (Inicio). GameWorld will call
+  // `inputRef.current.consumeEnergy` / `inputRef.current.addEnergy` when it
+  // needs to modify energy. If those are not provided, fall back to no-op.
+  const localConsumeEnergy = (amount: number) => {
+    try {
+      if (!inputRef || !inputRef.current || typeof inputRef.current.consumeEnergy !== 'function') return true
+      return inputRef.current.consumeEnergy(amount)
+    } catch (e) { return true }
+  }
+
+  const localAddEnergy = (amount: number) => {
+    try {
+      if (!inputRef || !inputRef.current || typeof inputRef.current.addEnergy !== 'function') return
+      inputRef.current.addEnergy(amount)
+    } catch (e) {}
+  }
+
+  // explosion / feedback effects when converting mass to energy
+  const [explosions, setExplosions] = useState<any[]>([])
+  const showExplosion = (x: number, y: number, text: string) => {
+    const id = `expl_${Date.now()}_${Math.random().toString(36).slice(2,7)}`
+    const translate = new Animated.Value(0)
+    const opacity = new Animated.Value(1)
+    const item = { id, x, y, text, translate, opacity }
+    setExplosions(prev => [...prev, item])
+    Animated.parallel([
+      Animated.timing(translate, { toValue: -40, duration: 800, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 0, duration: 800, useNativeDriver: true })
+    ]).start(() => {
+      setExplosions(prev => prev.filter(e => e.id !== id))
+    })
   }
 
   const addEntity = useCallback((spec: any) => {
     const key = spec.key || `ent_${Date.now()}_${(idCounter.current++)}`
+    const mass = spec.mass ?? 1
+    const cost = fnEnergyToMass(spec);
+
+    // consume energy before creating the entity
+    const canConsume = inputRef?.current?.consumeEnergy ? inputRef.current.consumeEnergy(cost) : true
+    if (!canConsume) {
+      return ''
+    }
     const entity = {
       id: key,
       time: spec.time ?? 0,
-      mass: spec.mass ?? 1,
+      mass: mass,
       position: spec.position ?? [0, 0],
       velocity: spec.velocity ?? [0, 0],
       kinetic: 0,
-      size: spec.size ?? 20,
-      renderer: spec.renderer ?? (<Box key={key} />),
+      size: spec.size ?? bodyVolumen(mass),
+      // attach inputRef on the entity so GameEngine passes it to the renderer
+      inputRef: inputRef,
+      renderer: spec.renderer ?? (<MassBody key={key} />),
     }
     totalCreatedRef.current += 1
     const next = { ...((resolvedEntitiesRef && resolvedEntitiesRef.current) ? resolvedEntitiesRef.current : {}), [key]: entity }
@@ -264,7 +371,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
       position: [pos.x, pos.y],
       velocity: [velocity.x, velocity.y],
       mass: opts.mass ?? 1,
-      size: opts.size ?? 20,
+      size: opts.size ?? bodyVolumen(opts.mass ?? 1),
       renderer: opts.renderer ?? undefined,
       kinetic: 0,
     }
@@ -280,13 +387,18 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
 
 
   const randomEntity = () => {
-    
-    const c = inputRef?.current?.centerRef?.current ?? internalCenterRef.current ?? customCenter;
-    var wt = 2 * Math.random() * Math.PI;
-    var r = { x: spawnDistance*Math.sin(wt) + c.x, y: spawnDistance*Math.cos(wt) + c.y };
-    var speed = Math.random()+1; // ajusta la magnitud de la velocidad aquí
+    const centerPoint = inputRef?.current?.centerRef?.current ?? internalCenterRef.current ?? customCenter;
+    const cfg = inputRef?.current?.getGameConfig ? inputRef.current.getGameConfig() : null;
+    var a = cfg && typeof cfg.fnAngle === 'function' ? cfg.fnAngle() : fnAngle();
+    // var a = dir/4;
+    // dir=-dir;
+    var wt = 2 * a * Math.PI;
+    var r = { x: spawnDistance*Math.sin(wt) + centerPoint.x, y: spawnDistance*Math.cos(wt) + centerPoint.y };
+    var speed = (Math.random()+1)*0.1; // ajusta la magnitud de la velocidad aquí
     var v = { x: -Math.sin(wt) * speed, y: -Math.cos(wt) * speed };
-    inputRef.current?.addEntityWithVelocity?.(r, v);
+    // random mass consumes energy as base mechanic
+    const mass = 1;
+    inputRef.current?.addEntityWithVelocity?.(r, v, { mass });
 
   }
   // ensure a resolved inputRef exists synchronously so callers can invoke methods early
@@ -310,7 +422,40 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
     inputRef.current.addEntity = addEntity
     inputRef.current.addEntityWithVelocity = addEntityWithVelocity
     inputRef.current.removeEntity = removeEntity
+
     inputRef.current.randomEntity = randomEntity
+
+    //console.log('GameWorld initialized with entities:', resolvedEntitiesRef.current);
+    inputRef.current.convertMassToEnergy = (id: string) => {
+      try {
+        const e = resolvedEntitiesRef.current?.[id]
+        if (!e) return
+        // compute energy gained using dynamic game config if provided
+        const cfg = inputRef.current?.getGameConfig ? inputRef.current.getGameConfig() : { goodvsevil, fnAngle, fnMassPotential, godtimer };
+        const mass = e.mass ?? 0
+        const kinetic = e.kinetic ?? 0
+        const baseEnergy = mass * c * c + kinetic
+        const energyGained = (typeof cfg.goodvsevil === 'number' ? cfg.goodvsevil : goodvsevil) * baseEnergy
+        // show explosion feedback at entity position then offer reward and award energy
+        try {
+          const pos = e.position ?? [0,0]
+          showExplosion(pos[0], pos[1], `+${Math.round(energyGained)}E`)
+          // choose reward tier by probabilities: bronze 60%, silver 30%, gold 10%
+          const rrand = Math.random();
+          let tier = 'bronze';
+          if (rrand > 0.9) tier = 'gold';
+          else if (rrand > 0.6) tier = 'silver';
+          const durationSec = tier === 'gold' ? 60 : (tier === 'silver' ? 30 : 10);
+          const rewardTypes = ['good_inc','good_dec','godtimer_dec','godtimer_inc','angle_change','massPotential_inc'];
+          const chosen = rewardTypes[Math.floor(Math.random() * rewardTypes.length)];
+          const reward = { id: `rw_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, type: chosen, tier, duration: durationSec * 1000, position: pos };
+          try { inputRef.current?.offerReward?.(reward) } catch (err) {}
+        } catch (err) {}
+        // remove entity and ask parent to award energy
+        inputRef.current?.removeEntity?.(id)
+        try { inputRef.current?.addEnergy?.(energyGained) } catch (err) {}
+      } catch (err) {}
+    }
     // synchronous getter for current zoom (fallbacks to 1)
     inputRef.current.getZoom = () => {
       try {
@@ -331,6 +476,10 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
       // bump version for any non-animated overlays that depend on it
       setCenterVersion(v => v + 1);
     }
+
+    // keep shared fallback in sync so renderers can access inputRef
+    sharedInputRef = inputRef
+    return () => { sharedInputRef = null }
   }, [inputRef, resolvedEntitiesRef, addEntity, addEntityWithVelocity, removeEntity, randomEntity, onStatsChange])
 
   const handleLevelUp = (topMass: number, topSize: number) => {
@@ -397,17 +546,24 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
             x:0,y:0
           }
           filteredEntities.forEach(e=>{
+            const colisionFn = (box,circle) => {
+              const vx = box.velocity[0]-circle.velocity[0];
+              const vy = box.velocity[1]-circle.velocity[1];
+              const massFactor = (circle.mass ?? 1) / (box.mass ?? 1);
+              return {
+                x: vx * (-collisionScalar) * massFactor,
+                y: vy * (-collisionScalar) * massFactor
+              }
+            }
             const dx = initialPos.x - e.position[0];
             const dy = initialPos.y - e.position[1];
             const distance = Math.sqrt(dx * dx + dy * dy);
 
             const size = (box.size / 2);
-            if (distance < size*2 && distance > size) {
-              const vx = box.velocity[0]-e.velocity[0];
-              const vy = box.velocity[1]-e.velocity[1];
-              const massFactor = (e.mass ?? 1) / (box.mass ?? 1);
-              colisions.x += vx * (-collisionScalar) * massFactor;
-              colisions.y += vy * (-collisionScalar) * massFactor;
+            if (distance > size && distance < 1.5*size) {
+              const col = colisionFn(box,e);
+              colisions.x += col.x;
+              colisions.y += col.y;
             } else if (distance <= size) {
               if (!allMerges.some((m:any)=>m.includes(box.id)&&m.includes(e.id))) {
                 allMerges.push([box.id,e.id]);
@@ -470,7 +626,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
 
         const mergeMass = (box,circle) => {
           box.mass += circle.mass;
-          box.size += circle.size/3;
+          box.size = bodyVolumen(box.mass);
 
           circle.mass = 0;
           circle.size = 0;
@@ -546,6 +702,7 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
               const massVal = Math.round(box.mass ?? 0);
               
               if (massVal < 3) { continue; } // no penalty for small entities
+              
               setPenaltyText(`-${massVal}`);
               const pfs = Math.min(Math.max((box.size ?? 20) * 0.6, 18), 180);
               setPenaltyFontSize(pfs);
@@ -560,12 +717,14 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
       }
 
 
-      if (time.current - lastCreated.time > 1000) {
-        lastCreated.time = time.current;
-        setTimeout(() => {
-          inputRefInner.current?.randomEntity?.();
-        }, 10);
-      }
+        const cfg = inputRefInner.current?.getGameConfig ? inputRefInner.current.getGameConfig() : null;
+        const spawnDelay = cfg && typeof cfg.godtimer === 'number' ? cfg.godtimer : godtimer;
+        if ((time.current ?? 0) - lastCreated.time > spawnDelay) {
+          lastCreated.time = time.current;
+          setTimeout(() => {
+            inputRefInner.current?.randomEntity?.();
+          }, 10);
+        }
 
 
       return entities
@@ -592,14 +751,21 @@ export default function GameWorld({ children, inputRef, entitiesRef, onStatsChan
             </GameEngine>
           </Animated.View>
 
+            
           {/* Level indicator overlay */}
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', zIndex: 20 }]}>
+          <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center', zIndex: 20 }]}>
             {levelVisible && (
               <Text style={{ fontSize: levelFontSize, color: '#ffffff', fontWeight: '700' }}>{levelText}</Text>
             )}
             {penaltyVisible && (
               <Text style={{ fontSize: penaltyFontSize, color: '#ff6666', fontWeight: '700', marginTop: 8 }}>{penaltyText}</Text>
             )}
+            {/* Explosions / feedback */}
+            {explosions.map(ex => (
+              <Animated.View key={ex.id} pointerEvents="none" style={{ position: 'absolute', left: ex.x - 10, top: ex.y - 10, transform: [{ translateY: ex.translate }], opacity: ex.opacity }}>
+                <Text style={{ color: '#ffff99', fontWeight: '700', textShadowColor: '#000', textShadowRadius: 4 }}>{ex.text}</Text>
+              </Animated.View>
+            ))}
           </View>
         </View>
       )

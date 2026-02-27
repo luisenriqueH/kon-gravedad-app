@@ -65,10 +65,9 @@ export default function RegisterEvent({ navigation, route }: any) {
         const start = new Date(existingEvent.startDate).getTime();
         const end = new Date(existingEvent.endDate).getTime();
         const diffHours = Math.round((end - start) / (1000 * 60 * 60));
-        setDurationHours(String(diffHours || existingEvent.salesDurationHours || 2));
-      } else if (existingEvent.salesDurationHours) {
-        setDurationHours(String(existingEvent.salesDurationHours));
+        setDurationHours(String(diffHours));
       }
+      
       setDescription(existingEvent.description || '');
       if (existingEvent.location) {
         setLocation(existingEvent.location);
@@ -121,7 +120,6 @@ export default function RegisterEvent({ navigation, route }: any) {
         body.startDate = start;
         const end = new Date(start.getTime() + Math.round(hours * 3600 * 1000));
         body.endDate = end;
-        body.salesDurationHours = hours;
       }
       if (description) body.description = description;
 

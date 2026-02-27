@@ -21,9 +21,6 @@ export class Event {
 
   @ApiProperty({ type: String, format: 'date-time', required: false })
   startDate?: Date;
-
-  @ApiProperty({ required: false })
-  salesDurationHours?: number;
   
   @ApiProperty({ type: String, format: 'date-time', required: false })
   endDate?: Date;

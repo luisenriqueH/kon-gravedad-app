@@ -44,7 +44,7 @@ const MassBody = (props: any) => {
   const collisionStyle = {position:'absolute', left:0, top:0, width:potentialRadius*(size/2),height:potentialRadius*(size/2),backgroundColor:'#ffffff55',borderRadius:'50%'};
   const scanStyle = {position:'absolute', left:-potentialRadius*(size/4), top:-potentialRadius*(size/4), width:potentialScanRadius*(size/2),height:potentialScanRadius*(size/2),backgroundColor:'#ffffff55',borderRadius:'50%'};
 
-  const isDebug = true;
+  const isDebug = false;
 
   return (
     <TouchableOpacity activeOpacity={0.8} disabled={!isLarge} onPress={() => handlePress()} style={{ position: 'absolute', left: x - size / 2, top: y - size / 2 }}>

@@ -261,22 +261,22 @@ export default function Inicio({ navigation }: any) {
       const cfg = gameConfigRef.current;
       if (type === 'good_inc') {
         const prev = cfg.goodvsevil;
-        cfg.goodvsevil = prev * 1.5;
+        cfg.goodvsevil = prev * 10;
         return () => { cfg.goodvsevil = prev }
       }
       if (type === 'good_dec') {
         const prev = cfg.goodvsevil;
-        cfg.goodvsevil = prev * 0.7;
+        cfg.goodvsevil = prev * 0.5;
         return () => { cfg.goodvsevil = prev }
       }
       if (type === 'godtimer_dec') {
         const prev = cfg.godtimer;
-        cfg.godtimer = Math.max(200, Math.floor(prev * 0.7));
+        cfg.godtimer = Math.max(200, Math.floor(prev * 0.5));
         return () => { cfg.godtimer = prev }
       }
       if (type === 'godtimer_inc') {
         const prev = cfg.godtimer;
-        cfg.godtimer = Math.floor(prev * 1.5);
+        cfg.godtimer = Math.floor(prev * 10);
         return () => { cfg.godtimer = prev }
       }
       if (type === 'angle_change') {
@@ -374,6 +374,21 @@ export default function Inicio({ navigation }: any) {
             // (totalEnergy>0)&&setTotalEnergy(totalEnergy ?? 0);
           }}
         ></GameWorld>
+        {/* Active buff indicators (bottom-left) */}
+        <View style={styles.buffRow} pointerEvents="none">
+          {activeBuffs.map(buff => {
+            const remainingMs = Math.max(0, (buff.expiresAt || 0) - Date.now());
+            const color = buff.tier === 'gold' ? '#ffd700' : (buff.tier === 'silver' ? '#c0c0c0' : '#cd7f32');
+            return (
+              <View key={buff.id} style={styles.buffItem}>
+                <View style={[styles.buffDot, { backgroundColor: color }]} />
+                <Text style={styles.buffLabel}>{(buff.type || '').replace('_',' ')}</Text>
+                <Text style={styles.buffTimer}>{formatMs(remainingMs)}</Text>
+              </View>
+            )
+          })}
+        </View>
+
         {/* Reward overlays (clickable) */}
         <View style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 40 }} pointerEvents="box-none">
           {rewards.map(rw => {
@@ -468,6 +483,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 8,
   },
+  buffRow: {
+    position: 'absolute',
+    bottom: 60,
+    left: 12,
+    zIndex: 60,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    pointerEvents: 'none',
+  },
+  buffItem: {
+    minWidth: 64,
+    marginRight: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buffDot: { width: 14, height: 14, borderRadius: 7, marginBottom: 4 },
+  buffLabel: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  buffTimer: { color: '#fff', fontSize: 11 },
   statsText: {
     color: '#fff',
     fontSize: 12,

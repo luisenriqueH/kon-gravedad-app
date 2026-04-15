@@ -29,32 +29,32 @@ export default function ScreenProvider({ title, authLock, personLock, backButton
 
   // Ajuste de padding inferior para dejar espacio a la botonera nativa
   const containerPadding = { paddingTop: (styles.container as any).padding + insets.top, paddingBottom: (styles.container as any).padding + insets.bottom }
-  const footerPadding = { paddingBottom: insets.bottom > 0 ? insets.bottom : 16 }
+  const footerPadding = { paddingBottom: insets.bottom > 0 ? insets.bottom : 0 }
 
 
-  
+
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <View style={[styles.container, containerPadding, style]}>
-      {/* Top segment: optional back button (left) and UserHeader (right when authLock) */}
+        {/* Top segment: optional back button (left) and UserHeader (right when authLock) */}
         <View style={styles.topSegment}>
-          <View style={{position:'absolute',zIndex:1}}>
+          <View style={{ position: 'absolute', zIndex: 1 }}>
             {backButton ? (
               <IconButton icon="arrow-left" size={24} onPress={() => navigation.goBack()} style={styles.backButton} />
             ) : null}
           </View>
 
-          <View style={[{flex:1, alignItems:'center'}]}>
+          <View style={[{ flex: 1, alignItems: 'center' }]}>
             {title ? <Text style={styles.title}>{title}</Text> : <View />}
             {authLock || personLock ? (<UserHeader navigation={navigation} personLock={personLock} />) : null}
           </View>
 
-          <View style={{position:'absolute'}} />
+          <View style={{ position: 'absolute' }} />
         </View>
-      
+
         {visible ? (<View style={[styles.content, contentStyle]}>{children}</View>) : null}
-            
+
         <View style={[{ width: '100%' }, footerPadding]}>
           {!bottomButtons ? (<Text style={{ textAlign: 'center' }}>Koningo</Text>) : null}
         </View>
@@ -68,15 +68,13 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    overflow:'scroll',
+    overflow: 'scroll',
   },
   topSegment: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
   },
   backButton: {
     padding: 0,

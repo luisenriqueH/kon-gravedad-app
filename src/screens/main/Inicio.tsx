@@ -15,12 +15,14 @@ const LIVES_TS_KEY = 'game:lastLifeTimestamp';
 export default function Inicio({ navigation }: any) {
   const [loading, setLoading] = useState(true);
 
+  const now = Date.now();
+
   return (
     <ScreenProvider bottomButtons={true} style={{ padding: 0 }} contentStyle={{ flex: 1, padding: 0, paddingInline: 0 }}>
       <View style={styles.container}>
         {Platform.OS === 'web' ? (
           <iframe
-            src="https://koningo.com/beta/gravedad/orbit/?ver=0028"
+            src="https://koningo.com/beta/gravedad/orbit/?ver=${now}"
             style={{
               width: '100%',
               height: '100%',
@@ -31,7 +33,7 @@ export default function Inicio({ navigation }: any) {
           />
         ) : (
           <WebView
-            source={{ uri: 'https://koningo.com/beta/gravedad/orbit/?ver=0028' }}
+            source={{ uri: `https://koningo.com/beta/gravedad/orbit/?ver=${now}` }}
             style={styles.webview}
             onLoadEnd={() => setLoading(false)}
             startInLoadingState={true}
